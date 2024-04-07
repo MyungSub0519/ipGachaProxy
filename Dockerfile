@@ -16,7 +16,7 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /root/
 
-EXPOSE 8080
+EXPOSE 8510
 
 COPY --from=builder /app/ipgachaproxy .
 

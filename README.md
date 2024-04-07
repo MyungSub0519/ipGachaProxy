@@ -8,5 +8,5 @@ go build -a -installsuffix cgo -o ipgachaproxy .
 
 ```
 docker build . -t ipgachaproxy:0.0.1
-docker run ipgachaproxy:0.0.1 -p 8080:8080
+docker run ipgachaproxy:0.0.1 -p 8510:8510
 ```
