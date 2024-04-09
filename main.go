@@ -4,13 +4,45 @@ import (
 	"flag"
 	"io"
 	"log"
+	"net"
 	"net/http"
 )
 
-// Define a command-line flag
 var debugMode = flag.Bool("debug", false, "Enable debug mode")
 
-func handleRequestAndRedirect(w http.ResponseWriter, r *http.Request) {
+func handleHTTPS(w http.ResponseWriter, r *http.Request) {
+    if *debugMode {
+        log.Printf("Received HTTPS request for: %s", r.Host)
+    }
+
+    destConn, err := net.Dial("tcp", r.Host)
+    if err != nil {
+        http.Error(w, "Failed to connect to host", http.StatusInternalServerError)
+        return
+    }
+    defer destConn.Close()
+
+    w.WriteHeader(http.StatusOK)
+
+    hijacker, ok := w.(http.Hijacker)
+    if !ok {
+        http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+        return
+    }
+
+    clientConn, _, err := hijacker.Hijack()
+    if err != nil {
+        http.Error(w, "Hijacking failed", http.StatusInternalServerError)
+        return
+    }
+    defer clientConn.Close()
+
+    go transfer(destConn, clientConn)
+    go transfer(clientConn, destConn)
+}
+
+
+func handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if *debugMode {
 		log.Printf("Received request: %s %s", r.Method, r.URL)
 	}
@@ -20,7 +52,6 @@ func handleRequestAndRedirect(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.DefaultTransport.RoundTrip(outReq)
 	if err != nil {
 		http.Error(w, "Error forwarding request: "+err.Error(), http.StatusInternalServerError)
-		log.Printf("Error forwarding request: %v", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -30,12 +61,14 @@ func handleRequestAndRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	copyHeader(w.Header(), resp.Header)
-
 	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
 
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		log.Printf("Error copying response body: %v", err)
-	}
+func transfer(destination io.WriteCloser, source io.ReadCloser) {
+	defer destination.Close()
+	defer source.Close()
+	io.Copy(destination, source)
 }
 
 func copyHeader(dst, src http.Header) {
@@ -46,13 +79,22 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodConnect {
+		handleHTTPS(w, r)
+	} else {
+		handleHTTP(w, r)
+	}
+}
+
 func main() {
-	// Parse the command-line flags
 	flag.Parse()
+
 	if *debugMode {
 		log.Println("Debug mode is enabled")
 	}
-	http.HandleFunc("/", handleRequestAndRedirect)
-	log.Println("Server started on :8510")
+
+	http.HandleFunc("/", handleRequest)
+	log.Println("Proxy server started on :8510")
 	log.Fatal(http.ListenAndServe(":8510", nil))
 }
